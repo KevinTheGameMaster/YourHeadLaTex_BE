@@ -1,0 +1,33 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments (recommended to name yours .venv)
+.venv/
+venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE-specific (VS Code, PyCharm)
+.vscode/
+.idea/
+
+# Database files (if using SQLite)
+*.db
+*.sqlite3
+
+._tmp/
