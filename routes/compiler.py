@@ -1,80 +1,65 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-import subprocess, tempfile, os, shutil, glob
+from dotenv import load_dotenv
+import httpx
+import os
 
 from schemas import CompileRequest
 
+load_dotenv()
+
 router = APIRouter(prefix="/compile", tags=["compiler"])
 
-# Folder untuk menyimpan .sty, .cls, .bst custom
-ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))
+LATEX_API_PRIMARY  = os.getenv("LATEX_API_PRIMARY", "https://latexonline.cc/compile")
+LATEX_API_FALLBACK = os.getenv("LATEX_API_FALLBACK", "https://texlive.net/run")
 
 
-def find_engine(engine: str) -> str:
-    found = shutil.which(engine)
-    if found:
-        return found
-    username = os.getenv("USERNAME", "")
-    candidates = [
-        rf"C:\Users\{username}\AppData\Local\Programs\MiKTeX\miktex\bin\x64\{engine}.exe",
-        rf"C:\Program Files\MiKTeX\miktex\bin\x64\{engine}.exe",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return None
+async def compile_via_latexonline(content: str, engine: str) -> bytes:
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        res = await client.post(
+            LATEX_API_PRIMARY,
+            params={"command": engine},
+            content=content.encode("utf-8"),
+            headers={"Content-Type": "application/x-tex"},
+        )
+        if res.status_code != 200 or "application/pdf" not in res.headers.get("content-type", ""):
+            raise ValueError(f"Status {res.status_code}: {res.text[:300]}")
+        return res.content
+
+
+async def compile_via_texlive(content: str, engine: str) -> bytes:
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        res = await client.post(
+            LATEX_API_FALLBACK,
+            data={
+                "filecontents[]": content,
+                "filename[]": "main.tex",
+                "engine": engine,
+                "return": "pdf",
+            },
+        )
+        if res.status_code != 200 or "application/pdf" not in res.headers.get("content-type", ""):
+            raise ValueError(f"Status {res.status_code}: {res.text[:300]}")
+        return res.content
 
 
 @router.post("")
 async def compile_latex(req: CompileRequest):
-    engine_path = find_engine(req.engine)
+    errors = []
 
-    if not engine_path:
-        raise HTTPException(500, {
-            "error": f"{req.engine} not found",
-            "log": "Pastikan MiKTeX sudah terinstall dan PATH sudah diset."
-        })
-
-    project_tmp = os.path.join(os.path.dirname(__file__), "..", "_tmp")
-    os.makedirs(project_tmp, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(dir=os.path.abspath(project_tmp)) as tmpdir:
-        tex_path = os.path.join(tmpdir, "main.tex")
-        pdf_path = os.path.join(tmpdir, "main.pdf")
-
-        # Tulis file .tex
-        with open(tex_path, "w", encoding="utf-8") as f:
-            f.write(req.content)
-
-        # Salin semua file assets (.sty, .cls, .bst, .png, dll) ke tmpdir
-        if os.path.isdir(ASSETS_DIR):
-            for filepath in glob.glob(os.path.join(ASSETS_DIR, "*")):
-                shutil.copy2(filepath, tmpdir)
-
-        try:
-            result = subprocess.run(
-                [
-                    engine_path,
-                    "-interaction=nonstopmode",
-                    "-halt-on-error",
-                    "-output-directory", tmpdir,
-                    tex_path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=tmpdir,
-            )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(408, "Compile timeout (30s)")
-
-        if not os.path.exists(pdf_path):
-            raise HTTPException(422, {
-                "error": "Compile failed",
-                "log": result.stdout + "\n" + result.stderr,
-            })
-
-        with open(pdf_path, "rb") as f:
-            pdf_bytes = f.read()
-
+    try:
+        pdf_bytes = await compile_via_latexonline(req.content, req.engine)
         return Response(content=pdf_bytes, media_type="application/pdf")
+    except Exception as e:
+        errors.append(f"Primary ({LATEX_API_PRIMARY}): {e}")
+
+    try:
+        pdf_bytes = await compile_via_texlive(req.content, req.engine)
+        return Response(content=pdf_bytes, media_type="application/pdf")
+    except Exception as e:
+        errors.append(f"Fallback ({LATEX_API_FALLBACK}): {e}")
+
+    raise HTTPException(503, {
+        "error": "Semua compiler API gagal",
+        "log": "\n".join(errors),
+    })
