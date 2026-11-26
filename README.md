@@ -119,12 +119,9 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Create the `.env` file
+### 4. On your `.env` file, add
 
-```dotenv
-BASE_URL=http://localhost:8000
-DATABASE_BASE_URL=sqlite:///./latex_editor.db
-USERNAME=Your Name
+```
 LATEX_API_PRIMARY=https://latex.ytotech.com/builds/sync
 ```
 
