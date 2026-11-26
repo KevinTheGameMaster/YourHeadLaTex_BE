@@ -119,13 +119,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. On your `.env` file, add
-
-```
-LATEX_API_PRIMARY=https://latex.ytotech.com/builds/sync
-```
-
-### 5. Run the server
+### 4. Run the server
 
 ```bash
 uvicorn main:app --reload
